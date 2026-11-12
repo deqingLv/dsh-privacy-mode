@@ -1,0 +1,38 @@
+# A native DSH bundle layer, applied BEFORE the host starts its plugins.
+# Profile/home/command-line overlays have higher precedence. Run the check tool.
+# No postinstall script, secret access, global fetch patch or firewall changes.
+
+- id: session-telemetry-otel
+  name: '@deepseek-ai/dsh-session-telemetry-otel'
+  config:
+    mode: DISABLED
+
+- id: session-log-deepseek
+  name: '@deepseek-ai/dsh-session-log-deepseek'
+  config:
+    enabled: false
+
+- id: plugin-package-inventory-deepseek
+  name: '@deepseek-ai/dsh-plugin-package-inventory-deepseek'
+  config:
+    enabled: false
+
+# Remove the actual desktop exporter, not merely its input producer.
+- id: desktop-product-telemetry
+  name: '@deepseek-ai/dsh-host-product-telemetry-otel'
+  disabled: true
+
+# Keep the native productAnalytics remote available, reporting policy=false.
+# appVersion retains the upstream expression; no false running version is made up.
+- id: product-analytics
+  name: '@deepseek-ai/dsh-client-product-analytics'
+  config:
+    enabled: false
+    appVersion: !!js process.env.DSH_CLIENT_VERSION
+
+- insert:
+    - id: privacy-mode-product-sink
+      name: dsh-privacy-mode/product-sink
+      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+    - id: privacy-mode
+      name: dsh-privacy-mode

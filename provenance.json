@@ -1,0 +1,31 @@
+{
+  "project": "dsh-privacy-mode",
+  "version": "0.1.0",
+  "verified_runtime": {
+    "dsh": "0.2.1-rc.5",
+    "cordis": "4.0.5",
+    "platform": "macOS arm64",
+    "node": "24.15.0",
+    "source": "/Applications/DeepSeek Harness.app/Contents/Resources/app.asar",
+    "source_sha256": "8dad52f295bdbe9fa71948fdf38ac2ce3c910213d3b89c37174b2af77db9fb31",
+    "test_method": "Official runtime resources extracted read-only; native patch compositor and plugin CLI exercised in temporary HOME/DSH_HOME; selected real plugins cold-booted against local collector. Full Electron GUI not tested."
+  },
+  "reviewed_contracts": [
+    "@deepseek-ai/dsh-base/cordis.patch.yml",
+    "@deepseek-ai/dsh-web-app/cordis.patch.yml",
+    "@deepseek-ai/cordis-plugin-include: applyEntryPatches",
+    "@deepseek-ai/dsh-plugin-manager: install/remove/default activation",
+    "@deepseek-ai/dsh-app-boot: profile composition and version admission",
+    "@deepseek-ai/dsh-session-telemetry-otel",
+    "@deepseek-ai/dsh-session-log-deepseek",
+    "@deepseek-ai/dsh-plugin-package-inventory-deepseek",
+    "@deepseek-ai/dsh-client-product-analytics",
+    "@deepseek-ai/dsh-host-product-telemetry-otel"
+  ],
+  "public_references": [
+    "https://github.com/deepseek-ai/deepseek-harness",
+    "https://www.deepseek.com/harness/en/data-processing/"
+  ],
+  "distribution": "Original plugin source and policy only. Does not redistribute extracted official runtime, profiles, account materials or credentials.",
+  "limits": ["Exact runtime version only", "Higher-precedence user overlays can override defaults", "Cold-start boundary after live install", "Cloud model/MCP/tool requests unaffected", "Not a network firewall"]
+}

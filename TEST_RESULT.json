@@ -1,0 +1,30 @@
+{
+  "passed": true,
+  "dshVersion": "0.2.1-rc.5",
+  "controls": {
+    "officialProductCollectorRequests": 1,
+    "officialFeedbackCollectorRequests": 1,
+    "privacyCollectorRequests": 0,
+    "identityReads": 0
+  },
+  "tests": [
+    "official native patch composition",
+    "higher-precedence override detected",
+    "real official product exporter positive control",
+    "real canonical feedback exporter positive control",
+    "real CLI tarball install/default selection",
+    "real CLI composed desktop bundle layers in custom profile",
+    "installed offline checker",
+    "selected real modules cold boot + installed privacy guard",
+    "failed guard does not publish status",
+    "live analytics false, no identity read",
+    "session telemetry no reporter",
+    "real request registry no log/inventory fields and no errors",
+    "same-module positive control restores both request fields",
+    "live override audit reports failure",
+    "feedback/product event/dispose produce no collector requests",
+    "real CLI uninstall restores lower layers"
+  ],
+  "note": "Synthetic data and local collector only. Selected official modules booted, not full Electron GUI. Does not guarantee all egress is blocked.",
+  "temporaryTestHome": "/var/folders/4k/ct4gcgt94tq1r8swqc0nrj5w0000gn/T/dsh-privacy-verification-ReOGrU"
+}

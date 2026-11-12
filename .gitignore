@@ -1,0 +1,9 @@
+node_modules/
+*.tgz
+*.zip
+.test-home/
+.env
+.credentials.yaml
+.DS_Store
+*.log
+coverage/
