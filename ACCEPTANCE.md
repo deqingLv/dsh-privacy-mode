@@ -8,7 +8,7 @@
 
 ## 验证证据
 
-- `npm run check`：**68 项**单元测试通过，0 失败；覆盖 32 种通道组合的审计期望、偏好文件的严格解析/权限/CAS/失败回滚、启动快照的冻结与 HMR 语义、HTTP 路由校验，以及设置页的槽位注册与请求载荷。
+- `npm run check`：**69 项**单元测试通过，0 失败；覆盖 32 种通道组合的审计期望、偏好文件的严格解析/权限/CAS/失败回滚/锁竞争与陈旧锁回收、启动快照的冻结与 HMR 语义、HTTP 路由校验，以及设置页的槽位注册与请求载荷。
 - 设置页：注册为「设置 → 插件 → 隐私上报」标签页（`plugins.item`，`id: privacy-mode`），只依赖 `slots` 与 `locale`；页面读取 `GET /api/privacy-mode/settings`、保存 `POST` 同一路径，错误码 `PREFS_CONFLICT` 触发重新读取。**未在真实 Electron GUI 中渲染验收**——本机无可用 React 运行时，只做了模块加载、槽位与数据层测试。
 - 真实插件 CLI：在全新临时 HOME/DSH_HOME 的自定义 Profile 中安装 `.tgz`，原生安装器默认加入 bundle 选择列表；导出包含官方 base/web-app 桌面条目的配置，并通过离线检查器。
 - 真实加载：从最终安装包加载 `privacy-mode` 与 sink，实际启动所需官方模块；没有启动完整 Desktop/Web 应用、云模型、真实登录态或其他网络工具。
@@ -19,7 +19,8 @@
 - 状态与覆盖：隔离 Loader 更高优先级重新开启 `product-analytics` 时，插件**仍发布** `privacyMode.status()`，`policy.ok === false` 且列出 `PRIVACY_OVERRIDE_OR_UNRESOLVED`；启动不再因审计失败而中断（旧版行为已废弃）。
 - 选择性上报 A/B：保存 `feedback: true` 后 `pendingRestart === true`、`applied.channels.feedback` 仍为 `false`、`sessionTelemetry.sharing` 仍是 `disabled`；用同一份偏好文件重新 boot 后 `sharing === 'feedback-only'`、`pendingRestart === false`；最后保存全关复原。
 - 真实 CLI 卸载：本包从选择列表移除，原组合默认值恢复，隐私条目消失；不覆盖用户原有 patch。
-- 集成测试共 **18 项**全部通过（`passed: true`），运行摘要保存在 `TEST_RESULT.json`。
+- 集成测试共 **18 项**全部通过（`passed: true`，摘要写入 `DSH_TEST_RESULT`，最近一次为 `/tmp/privacy-integration-result2.json`），其中第 12、13 项正是「保存后本次不生效 / 重新 boot 才生效」的 A/B。
+- 设置页展示三层状态：已保存的选择、本次启动实际生效值（每行“本次启动”）、当前运行态；保存后仍显示“待重启生效”。
 
 ## 本机正式环境边界
 

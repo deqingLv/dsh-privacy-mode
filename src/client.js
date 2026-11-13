@@ -31,6 +31,8 @@ window.__ModuleLoader__.load({
 			saved: '已保存，重启后生效',
 			unchanged: '已保存',
 			conflict: '设置已在别处修改，已重新读取最新状态',
+			busy: '另一处正在保存，请稍后重试',
+			applied: '本次启动',
 			failed: '保存失败',
 			loadFailed: '读取失败',
 			issues: '审计问题',
@@ -63,6 +65,8 @@ window.__ModuleLoader__.load({
 			saved: 'Saved; applies after restart',
 			unchanged: 'Saved',
 			conflict: 'Settings changed elsewhere; reloaded the latest state',
+			busy: 'Another save is in progress; try again',
+			applied: 'This boot',
 			failed: 'Save failed',
 			loadFailed: 'Load failed',
 			issues: 'Audit problems',
@@ -149,7 +153,7 @@ window.__ModuleLoader__.load({
 		 * @param props - the row props.
 		 * @returns the row element.
 		 */
-		function ChannelRow({ channel, enabled, busy, disabled, t, onToggle }) {
+		function ChannelRow({ channel, enabled, applied, busy, disabled, t, onToggle }) {
 			const labelId = `privacy-mode-${channel.key}`;
 			return jsxs('div', {
 				className: 'sb-priv-row',
@@ -159,7 +163,12 @@ window.__ModuleLoader__.load({
 						className: 'sb-priv-copy',
 						children: [
 							jsx('div', { className: 'sb-priv-label', id: labelId, children: t(`ch${channel.key[0].toUpperCase()}${channel.key.slice(1)}`) }),
-							jsx('div', { className: 'sb-priv-hint', children: t(`hint${channel.key[0].toUpperCase()}${channel.key.slice(1)}`) })
+							jsx('div', { className: 'sb-priv-hint', children: t(`hint${channel.key[0].toUpperCase()}${channel.key.slice(1)}`) }),
+							jsx('div', {
+								className: 'sb-priv-applied',
+								'data-applied': applied === true ? 'on' : 'off',
+								children: `${t('applied')}: ${applied === true ? t('on') : t('off')}`
+							})
 						]
 					}),
 					jsx('button', {
@@ -216,8 +225,8 @@ window.__ModuleLoader__.load({
 						setNotice(receipt?.pendingRestart === false ? t('unchanged') : t('saved'));
 						await load();
 					} catch (failure) {
-						if (failure?.code === 'PREFS_CONFLICT') {
-							setNotice(t('conflict'));
+						if (failure?.code === 'PREFS_CONFLICT' || failure?.code === 'PREFS_BUSY') {
+							setNotice(t(failure.code === 'PREFS_BUSY' ? 'busy' : 'conflict'));
 							await load();
 						} else {
 							setError(String(failure?.message ?? failure));
@@ -242,6 +251,7 @@ window.__ModuleLoader__.load({
 				});
 
 			const channels = channelMap(status);
+			const appliedChannels = status?.applied?.channels ?? {};
 			const pending = status?.pendingRestart === true;
 			const issues = Array.isArray(status?.issues) ? status.issues : [];
 			const healthy = status?.policy?.ok !== false;
@@ -268,6 +278,7 @@ window.__ModuleLoader__.load({
 								{
 									channel,
 									enabled: channels[channel.key] === true,
+									applied: appliedChannels[channel.key] === true,
 									busy: busy === channel.key,
 									disabled: false,
 									t,
@@ -316,6 +327,8 @@ window.__ModuleLoader__.load({
 .sb-priv-copy{min-width:0}
 .sb-priv-label{font-weight:500}
 .sb-priv-hint{color:var(--dsw-alias-text-secondary,#4e5969);font-size:12px}
+.sb-priv-applied{margin-top:2px;font-size:12px;color:var(--dsw-alias-text-tertiary,#86909c)}
+.sb-priv-applied[data-applied="on"]{color:#0f7b40}
 .sb-priv-switch{position:relative;flex:none;width:36px;height:20px;padding:0;border:0;border-radius:999px;cursor:pointer;background:#c9cdd4;transition:background .15s ease}
 .sb-priv-switch[data-state="on"]{background:#1664ff}
 .sb-priv-switch:disabled{opacity:.55;cursor:progress}

@@ -25,12 +25,12 @@
 
 ### Added
 
-- 设置页：新增「设置 → 插件 → 隐私上报」，五项通道逐项开关，展示已保存、本次启动生效与运行态三种状态，覆盖或审计问题以列表呈现；保存走宿主已鉴权的 `GET/POST /api/privacy-mode/settings`，并发写返回 `PREFS_CONFLICT` 并重新读取。
+- 设置页：新增「设置 → 插件 → 隐私上报」，五项通道逐项开关，展示已保存的选择、本次启动实际生效值（每行“本次启动”）与运行态三种状态，覆盖或审计问题以列表呈现；保存走宿主已鉴权的 `GET/POST /api/privacy-mode/settings`，并发写返回 `PREFS_CONFLICT` 并重新读取；另一个保存正在进行时返回 `PREFS_BUSY`，短暂等待后仍被占用才报错，崩溃遗留的锁超过 10 秒自动回收。
 - 后端偏好：`privacy-mode/prefs.json`（0600、原子写、CAS）+ 冻结的启动快照，`cordis.patch.yml` 由快照驱动；保存只在下次冷启动生效，热重载不重新采样。
 - 审计语义调整：覆盖不再让插件激活失败，改为始终发布 `privacyMode.status()` 并列出问题码（`PRIVACY_OVERRIDE_OR_UNRESOLVED` 等）。
 - 测试：单元测试 25 → 68（32 种通道组合、偏好解析/权限/CAS、启动快照与 HMR、路由校验、设置页槽位与载荷）；集成测试新增保存后待重启与重新 boot 生效的 A/B 对照，共 18 项。
 
-- Settings page under Settings → Plugins → Privacy reporting with per-channel switches, showing saved, applied and live state; overrides surface as issues instead of failing activation. Saving goes through the Host's authenticated `GET/POST /api/privacy-mode/settings`; a concurrent write returns `PREFS_CONFLICT`.
+- Settings page under Settings → Plugins → Privacy reporting with per-channel switches, showing the saved selection, the value this boot applied (a “This boot” line per row) and live state; overrides surface as issues instead of failing activation. Saving goes through the Host's authenticated `GET/POST /api/privacy-mode/settings`; a concurrent write returns `PREFS_CONFLICT`; a save already in flight returns `PREFS_BUSY` after a short wait, and a lock left by a crashed process is reclaimed after 10 seconds.
 - Backend preferences (`privacy-mode/prefs.json`, 0600, atomic write, CAS) and a frozen per-boot snapshot that drives `cordis.patch.yml`; saving requires a cold restart and a reload never re-samples.
 - Audit no longer fails activation: the plugin always publishes `privacyMode.status()` and reports issues.
 - Tests: 25 → 68 unit tests plus an 18-check integration run with a save/reboot A/B.

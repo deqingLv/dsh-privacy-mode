@@ -103,10 +103,10 @@ DSH_TEST_PNPM=/path/to/existing/pnpm.cjs npm run test:integration
 安装后，在 DSH 的 **设置 → 插件 → 隐私上报** 里可以看到五项开关。默认全部关闭；打开某一项表示你明确要求恢复该通道，而不是放宽整个插件的校验。
 
 - 保存立即写盘，但**只影响下一次冷启动**。当前进程和配置热重载都不会因此打开通道，页面会显示“待重启生效”。
-- 产品埋点拆成两个开关：`产品分析采集` 决定是否采集（可能读取系统与身份信息），`产品分析导出` 决定是否真的发往 OTLP 端点。只开采集、不开导出时，事件仍留在本机队列。
-- 页面同时显示**已保存的选择**、**本次启动实际生效的值**和**当前运行态**（反馈导出模式、采集是否开启、零传输接收器是否在位）。三者不一致时以“待重启”提示，不假装已经生效。
+- 产品埋点拆成两个开关：`产品分析采集` 决定是否采集（可能读取系统与身份信息），`产品分析导出` 决定是否真的发往 OTLP 端点。只开采集、不开导出时，事件会被零传输接收器直接丢弃（不排队、不补传）。
+- 页面同时显示**已保存的选择**（开关本身）、**本次启动实际生效的值**（每行下方的“本次启动”）和**当前运行态**（反馈导出模式、采集是否开启、零传输接收器是否在位）。三者不一致时以“待重启”提示，不假装已经生效。
 - 审计仍然生效：如果其他 Profile/Home patch 覆盖了受保护条目，页面会列出问题码（`PRIVACY_OVERRIDE_OR_UNRESOLVED` 等），但插件不会因此让整个 DSH 启动失败——它只报告，不接管。
-- 设置走宿主已鉴权的 `GET/POST /api/privacy-mode/settings`，只写 `privacy-mode/prefs.json`，绝不调用配置编辑器或热重载 Loader。并发修改会返回 `PREFS_CONFLICT`，页面重新读取最新状态而不是覆盖别人的改动。
+- 设置走宿主已鉴权的 `GET/POST /api/privacy-mode/settings`，只写 `privacy-mode/prefs.json`，绝不调用配置编辑器或热重载 Loader。并发修改会返回 `PREFS_CONFLICT`，页面重新读取最新状态而不是覆盖别人的改动；另一个保存正在进行时返回 `PREFS_BUSY`（同样 409），页面提示稍后重试并重新读取。
 
 **边界不变**：这是配置控制，不是抓包，也不是出站防火墙。真实 Electron 冷启动验收尚未执行；在完成之前请使用隔离 Profile，并保持全关。
 
@@ -114,8 +114,8 @@ DSH_TEST_PNPM=/path/to/existing/pnpm.cjs npm run test:integration
 
 After installation, **Settings → Plugins → Privacy reporting** lists the five channels. They all start off; enabling one is an explicit request to restore that channel, not a relaxation of the plugin's audit.
 
-Saving writes the profile's `privacy-mode/prefs.json` and only affects the **next cold start** — the running process and configuration reloads never turn a channel on, and the page says so. Collection (`productAnalytics`) and export (`productExport`) are separate switches: with export off, collected events stay in the local queue. The page shows the saved selection, the values this boot actually applied, and the live runtime state, so a pending change is never presented as active.
+Saving writes the profile's `privacy-mode/prefs.json` and only affects the **next cold start** — the running process and configuration reloads never turn a channel on, and the page says so. Collection (`productAnalytics`) and export (`productExport`) are separate switches: with export off, the zero-transport sink drops collected events instead of queueing or retrying them. The page shows the saved selection (the switches), the value this boot actually applied (a “This boot” line under each row), and the live runtime state, so a pending change is never presented as active.
 
-The audit still reports overrides (`PRIVACY_OVERRIDE_OR_UNRESOLVED` and friends) as page issues without failing the whole DSH boot. Settings travel over the Host's authenticated `GET/POST /api/privacy-mode/settings`, which only writes preferences — it never calls the config editor or hot-reloads the loader; a concurrent write returns `PREFS_CONFLICT` and the page reloads instead of overwriting.
+The audit still reports overrides (`PRIVACY_OVERRIDE_OR_UNRESOLVED` and friends) as page issues without failing the whole DSH boot. Settings travel over the Host's authenticated `GET/POST /api/privacy-mode/settings`, which only writes preferences — it never calls the config editor or hot-reloads the loader; a concurrent write returns `PREFS_CONFLICT` and the page reloads instead of overwriting, while a save already in flight returns `PREFS_BUSY` (also 409) so the page can ask for a retry.
 
 This is still a configuration control, not packet capture and not an egress firewall. A real Electron cold-start acceptance test has not been performed; use an isolated profile and keep every channel off until it is.

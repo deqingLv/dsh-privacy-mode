@@ -9,7 +9,7 @@ export function registerRoutes(ctx, service) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k=>!['channels','expectedUpdatedAt'].includes(k)) || !Object.hasOwn(body,'channels') || (Object.hasOwn(body,'expectedUpdatedAt') && body.expectedUpdatedAt !== null && typeof body.expectedUpdatedAt !== 'string')) return json({code:'INVALID_BODY'},400);
   if (!validChannels(body.channels)) return json({code:'INVALID_CHANNEL'},400);
   try { return json(await service.save(body.channels,body.expectedUpdatedAt)); }
-  catch(e) { return json({code:e.code === 'PREFS_CONFLICT' ? e.code : 'PREFS_WRITE_FAILED'},e.code === 'PREFS_CONFLICT' ? 409 : 500); }
+  catch(e) { const code=e.code === 'PREFS_CONFLICT' || e.code === 'PREFS_BUSY' ? e.code : 'PREFS_WRITE_FAILED'; return json({code},code === 'PREFS_WRITE_FAILED' ? 500 : 409); }
  }});
  return true;
 }
