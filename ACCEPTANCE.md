@@ -8,17 +8,18 @@
 
 ## 验证证据
 
-- `npm run check`：25 项单元测试通过，0 失败；覆盖默认配置、五个条目逐项覆盖、同 id 不同模块、额外官方上报实例、缺失/重复条目、未知版本、嵌套结构、空 sink、CLI 参数、敏感错误文本保护和 `!!js` 不执行。
+- `npm run check`：**68 项**单元测试通过，0 失败；覆盖 32 种通道组合的审计期望、偏好文件的严格解析/权限/CAS/失败回滚、启动快照的冻结与 HMR 语义、HTTP 路由校验，以及设置页的槽位注册与请求载荷。
+- 设置页：注册为「设置 → 插件 → 隐私上报」标签页（`plugins.item`，`id: privacy-mode`），只依赖 `slots` 与 `locale`；页面读取 `GET /api/privacy-mode/settings`、保存 `POST` 同一路径，错误码 `PREFS_CONFLICT` 触发重新读取。**未在真实 Electron GUI 中渲染验收**——本机无可用 React 运行时，只做了模块加载、槽位与数据层测试。
 - 真实插件 CLI：在全新临时 HOME/DSH_HOME 的自定义 Profile 中安装 `.tgz`，原生安装器默认加入 bundle 选择列表；导出包含官方 base/web-app 桌面条目的配置，并通过离线检查器。
 - 真实加载：从最终安装包加载 `privacy-mode` 与 sink，实际启动所需官方模块；没有启动完整 Desktop/Web 应用、云模型、真实登录态或其他网络工具。
 - 官方产品 OTel 导出正向对照：本机 HTTP 接收端收到 **1 次**合成事件请求。
 - 官方反馈会话 OTel 正向对照：通过真实 Session 追加规范 `feedback/record`，接收端收到 **1 次**请求。
 - 隐私模式：规范反馈、本地产品事件、直接 sink 调用及资源释放后，接收端新增请求 **0 次**；产品身份读取 **0 次**；Session OTel reporter 未创建。
 - 请求扩展真实 API：隐私模式下不产生 `dsh_session_log` 和 `dsh_plugin_packages`，且无准备失败。只在隔离测试内重新开启同一官方模块时，两字段恢复，证明并非测试链路无效。
-- 状态失败检查：模拟启用的存活 Analytics 时插件拒绝激活、不发布成功状态服务；隔离 Loader 更高优先级重新开启日志条目后，状态报告失败。
+- 状态与覆盖：隔离 Loader 更高优先级重新开启 `product-analytics` 时，插件**仍发布** `privacyMode.status()`，`policy.ok === false` 且列出 `PRIVACY_OVERRIDE_OR_UNRESOLVED`；启动不再因审计失败而中断（旧版行为已废弃）。
+- 选择性上报 A/B：保存 `feedback: true` 后 `pendingRestart === true`、`applied.channels.feedback` 仍为 `false`、`sessionTelemetry.sharing` 仍是 `disabled`；用同一份偏好文件重新 boot 后 `sharing === 'feedback-only'`、`pendingRestart === false`；最后保存全关复原。
 - 真实 CLI 卸载：本包从选择列表移除，原组合默认值恢复，隐私条目消失；不覆盖用户原有 patch。
-
-原始运行摘要保存在 `TEST_RESULT.json`。最终安装包不包含测试运行时、账号、凭据、node_modules 或测试 Home。源码 ZIP 包含可复现测试，不包含官方运行时。
+- 集成测试共 **18 项**全部通过（`passed: true`），运行摘要保存在 `TEST_RESULT.json`。
 
 ## 本机正式环境边界
 
@@ -32,3 +33,7 @@
 4. 云模型输入、上下文和工具结果、第三方插件/MCP/子进程网络、更新、认证和市场查询不在控制范围内。
 5. 卸载可能恢复开启，重新开启 Session Log 可能补传关闭期间记录。
 6. 只验证本机 macOS ARM64 与指定版本；其他平台/版本需另行验证。
+
+Selective reporting acceptance: the settings page lives under Settings → Plugins → Privacy reporting and only touches `privacy-mode/prefs.json` through the authenticated settings route. Saving affects the next cold start only; a reload never re-samples the boot snapshot. Collection and export are separate switches, and an override is reported as a page issue instead of failing the boot. The page itself was not rendered in a real Electron GUI. This is not a firewall; start with an isolated profile and every channel off.
+
+选择性上报验收：设置页位于「设置 → 插件 → 隐私上报」，只通过已鉴权的设置路由读写 `privacy-mode/prefs.json`。保存仅在下次冷启动生效，热重载不会重新采样启动快照；采集与导出分别控制，覆盖情况以页面问题列表呈现而不再中断启动。设置页本身尚未在真实 Electron GUI 渲染验收。此功能不是防火墙，请先使用隔离 profile 并保持全部关闭。

@@ -16,15 +16,22 @@ const anchor = resolve(runtime, 'package.json');
 const requireRuntime = createRequire(anchor);
 let pluginRequire = createRequire(new URL('../package.json', import.meta.url));
 let pluginAnchor = new URL('../package.json', import.meta.url).href;
+// Self-reference through a synthetic profile path is not resolvable before the
+// tarball is installed, so the hook falls back to this repository's own files.
+const pluginFiles = new Map([['dsh-privacy-mode','src/index.mjs'],['dsh-privacy-mode/boot-policy','src/boot-policy.cjs'],['dsh-privacy-mode/policy','src/policy.mjs'],['dsh-privacy-mode/product-sink','src/product-sink.mjs'],['dsh-privacy-mode/package.json','package.json']]);
+const pluginRoot = new URL('../', import.meta.url);
 registerHooks({ resolve(specifier, context, next) {
   if (specifier.startsWith('@deepseek-ai/')) return next(specifier, { ...context, parentURL: pathToFileURL(anchor).href });
-  if (specifier === 'dsh-privacy-mode' || specifier.startsWith('dsh-privacy-mode/')) return next(specifier, { ...context, parentURL: pluginAnchor });
+  if (specifier === 'dsh-privacy-mode' || specifier.startsWith('dsh-privacy-mode/')) {
+    try { return next(specifier, { ...context, parentURL: pluginAnchor }); }
+    catch (error) { if (!pluginFiles.has(specifier)) throw error; return { url: new URL(pluginFiles.get(specifier), pluginRoot).href, shortCircuit: true }; }
+  }
   return next(specifier, context);
 } });
 const bootApi = await import('@deepseek-ai/dsh-app-boot');
 assert.equal(bootApi.getDshRuntimeVersion(), SUPPORTED_DSH);
 const { Context } = await import('@deepseek-ai/cordis');
-const { default: Loader } = await import('@deepseek-ai/cordis-plugin-loader');
+const { default: Loader, interpolate, evaluate } = await import('@deepseek-ai/cordis-plugin-loader');
 const { applyEntryPatches, entryListSchema } = await import('@deepseek-ai/cordis-plugin-include');
 const productMod = await import('@deepseek-ai/dsh-host-product-telemetry-otel');
 const otelMod = await import('@deepseek-ai/dsh-otel');
@@ -41,15 +48,23 @@ const dshHome = join(home,'dsh'); await mkdir(dshHome);
 for (const key of Object.keys(process.env)) if (!['PATH','SystemRoot','TMPDIR','DSH_TEST_RUNTIME','DSH_TEST_TARBALL','DSH_TEST_PNPM','DSH_TEST_RESULT'].includes(key)) delete process.env[key];
 process.env.HOME = home; process.env.DSH_HOME = dshHome;
 process.env.XDG_CONFIG_HOME = join(home,'config'); process.env.DSH_CLIENT_VERSION = SUPPORTED_DSH;
+// The patch stores its managed values as !!js expressions. Composition, dump and
+// the offline checker all keep them unevaluated, so this test evaluates them the
+// same way the loader does: a stub context exposing only profileContext.
+const evalContext = dir => ({ root: {}, get: key => (key === 'profileContext' ? { name: 'desktop', dir } : undefined) });
+// Unrelated official rows use helpers such as dshHomePath(); only the managed
+// rows are expected to resolve here, so an unresolvable row keeps its raw form.
+const evaluateRows = (dir, list) => list.map(row => { try { return interpolate(evalContext(dir), row); } catch { return row; } });
 const base = yaml.load(await readFile(requireRuntime.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'), 'utf8'), { schema: entryListSchema });
 const web = yaml.load(await readFile(requireRuntime.resolve('@deepseek-ai/dsh-web-app/cordis.patch.yml'), 'utf8'), { schema: entryListSchema });
 const patch = yaml.load(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'), { schema: entryListSchema });
 const baseline = applyEntryPatches([], [...base,...web]);
 const rows = applyEntryPatches([], [...base,...web,...patch], (...args)=>{throw new Error(args.join(' '));});
-assert.ok(auditEntries(rows,{runtimeVersion:SUPPORTED_DSH,desktop:true}).ok);
+const evaluatedRows = evaluateRows(join(temp,'compose-default'), rows);
+assert.ok(auditEntries(evaluatedRows,{runtimeVersion:SUPPORTED_DSH,desktop:true}).ok);
 const reverted = applyEntryPatches([], [...base,...web]);
 assert.deepEqual(reverted, baseline, 'No mutation of original base rows');
-assert.equal(auditEntries(applyEntryPatches(rows,[{id:'session-log-deepseek',config:{enabled:true}}]),{runtimeVersion:SUPPORTED_DSH,desktop:true}).ok,false);
+assert.equal(auditEntries(applyEntryPatches(evaluatedRows,[{id:'session-log-deepseek',config:{enabled:true}}]),{runtimeVersion:SUPPORTED_DSH,desktop:true}).ok,false);
 
 let requests=[];
 const server=createServer((req,res)=>{
@@ -106,9 +121,11 @@ assert.ok(manifest.dsh.profile.bundles.includes('dsh-privacy-mode'),'Real CLI mu
 pluginRequire=createRequire(join(profileDir,'package.json'));
 pluginAnchor=pathToFileURL(join(profileDir,'package.json')).href;
 const dump=run(['--profile','privacy-test','--dump-config']);
-const composed=yaml.load(dump,{schema:entryListSchema});
+// dump-config composes patch layers without booting, so !!js stays unresolved.
+const composedRaw=yaml.load(dump,{schema:entryListSchema});
+const composed=evaluateRows(profileDir,composedRaw);
 assert.ok(auditEntries(composed,{runtimeVersion:SUPPORTED_DSH,desktop:true}).ok);
-await writeFile(join(temp,'composed.yml'),dump);
+await writeFile(join(temp,'composed.yml'),yaml.dump(composed,{schema:entryListSchema}));
 const checker=pluginRequire.resolve('dsh-privacy-mode/package.json');
 const check=spawnSync(process.execPath,[join(dirname(checker),'bin/check.mjs'),'--config',join(temp,'composed.yml'),'--dsh-version',SUPPORTED_DSH,'--desktop'],{env,encoding:'utf8'});
 assert.equal(check.status,0,check.stderr);
@@ -117,8 +134,9 @@ assert.equal(check.status,0,check.stderr);
 // The full desktop composition is audited above, but is not booted: doing so
 // would initialize account services/network tools unrelated to this synthetic test.
 const ids=new Set(['session','deepseek-llm-api-extensions','otel','session-telemetry-otel','session-log-deepseek','plugin-package-inventory-deepseek','product-analytics','desktop-product-telemetry','privacy-mode-product-sink','privacy-mode']);
-const selected=composed.filter(row=>ids.has(row.id)).map(row=>({...row,config:row.id==='product-analytics'?{...row.config,appVersion:SUPPORTED_DSH}:row.id==='session-telemetry-otel'?{...row.config,exporter:{url:endpoint}}:row.config}));
-const fixture=join(temp,'selected-root.yml'); await writeFile(fixture,yaml.dump(selected,{schema:entryListSchema}));
+const selectedRaw=composedRaw.filter(row=>ids.has(row.id)).map(row=>({...row,config:row.id==='product-analytics'?{...row.config,appVersion:SUPPORTED_DSH}:row.id==='session-telemetry-otel'?{...row.config,exporter:{url:endpoint}}:row.config}));
+const selected=evaluateRows(profileDir,selectedRaw);
+const fixture=join(temp,'selected-root.yml'); await writeFile(fixture,yaml.dump(selectedRaw,{schema:entryListSchema}));
 let identityReads=0;
 let context;
 try {
@@ -133,20 +151,48 @@ try {
  }
  const failedGuard = new Context();
  try {
-   failedGuard.provide('loader',{entries(){return composed.map(row=>({options:row}));}});
-   failedGuard.provide('profileContext',{name:'desktop'});
+   const overridden=composed.map(row=>row.id==='product-analytics'?{...row,config:{...row.config,enabled:true}}:row);
+   failedGuard.provide('loader',{entries(){return overridden.map(row=>({options:row,evaluate(expr){return evaluate(evalContext(profileDir),expr);}}));}});
+   failedGuard.provide('profileContext',{name:'desktop',dir:profileDir});
    failedGuard.provide('productAnalytics',{enabled(){return true;}});
    const plugin=await import('dsh-privacy-mode');
-   await assert.rejects(async()=>{await failedGuard.plugin(plugin.default);},/LIVE_ANALYTICS_ENABLED/);
-   assert.equal(failedGuard.get('privacyMode'),undefined,'Failed guard must not publish a healthy status service');
+   await failedGuard.plugin(plugin.default);
+   const guarded=failedGuard.get('privacyMode');
+   assert.ok(guarded,'The guard always publishes its status so an override is visible, not fatal');
+   const guardStatus=guarded.status();
+   assert.equal(guardStatus.policy.ok,false,'A live override must be reported');
+   assert.ok(guardStatus.policy.issues.some(issue=>issue.code==='PRIVACY_OVERRIDE_OR_UNRESOLVED'),'Override issue must name the affected channel');
  } finally { await failedGuard.fiber.dispose(); }
- assert.ok(context.privacyMode.status().ok);
+ assert.ok(context.privacyMode.status().policy.ok);
  assert.equal(context.productAnalytics.enabled(),false);
  await context.productAnalytics.report({eventName:'send_button_click',timestamp:Date.now(),attributes:{}});
  assert.equal(identityReads,0);
  assert.equal(context.productTelemetry.privacyModeSink,true);
  assert.equal(context.sessionTelemetry.sharing,'disabled');
  assert.equal(context.sessionTelemetry.provider,undefined,'Disabled backend must not construct its reporter');
+ // Saving must not hot-apply: the boot snapshot lives on the root context, so the
+ // running composition keeps its frozen selection until the next cold start.
+ const savedOn=await context.privacyMode.save({feedback:true,sessionLog:false,inventory:false,productAnalytics:false,productExport:false});
+ assert.equal(savedOn.pendingRestart,true,'A saved change must be reported as pending a restart');
+ assert.equal(savedOn.applied.channels.feedback,false,'The running boot keeps its frozen snapshot');
+ assert.equal(context.sessionTelemetry.sharing,'disabled','Saving must not hot-apply the selection');
+ const afterSave=context.privacyMode.status();
+ assert.equal(afterSave.pendingRestart,true);
+ assert.equal(afterSave.policy.ok,true,'Entries still match the frozen boot selection');
+ assert.deepEqual(afterSave.saved.channels,{feedback:true,sessionLog:false,inventory:false,productAnalytics:false,productExport:false});
+ const reboot=await bootApi.boot('privacy-test',fixture,[],async c=>{
+   c.provide('profileContext',{name:'desktop',dir:profileDir,home:dshHome});
+   c.provide('deepseekAccount',{getDeviceIdentity(){identityReads++;throw new Error('Identity read forbidden in test');}});
+   c.provide('agents',{get(){return undefined;},values(){return[];}});
+ },pathToFileURL(runtime+'/').href);
+ try {
+   assert.equal(reboot.sessionTelemetry.sharing,'feedback-only','A new boot must apply the saved selection');
+   assert.equal(reboot.privacyMode.status().pendingRestart,false);
+   assert.equal(reboot.privacyMode.status().policy.ok,true);
+ } finally { await reboot.fiber.dispose(); }
+ const restoredPrefs=await context.privacyMode.save({feedback:false,sessionLog:false,inventory:false,productAnalytics:false,productExport:false},savedOn.saved.updatedAt);
+ assert.equal(restoredPrefs.pendingRestart,false,'Restoring the default selection clears the pending restart');
+ assert.equal(context.privacyMode.status().pendingRestart,false);
  const session=context.sessions.create('synthetic-session');
  session.append('feedback/record',{text:'synthetic feedback remains local'});
  const prepared=await context.deepseekLlmApiExtensions.prepare({sessionId:session.id,signal:new AbortController().signal});
@@ -166,7 +212,7 @@ try {
  assert.ok(Object.hasOwn(enabledFields.fields,'dsh_session_log'));
  assert.ok(Object.hasOwn(enabledFields.fields,'dsh_plugin_packages'));
  assert.equal(context.deepseekLlmApiExtensions.warnedFields.size,0);
- assert.equal(context.privacyMode.status().ok,false,'Live status must detect a subsequent override');
+ assert.equal(context.privacyMode.status().policy.ok,false,'Live status must detect a subsequent override');
  await delay(300);
  assert.equal(requests.length,allControlRequests,'Known official reporters must not send after feedback or product events');
  await context.fiber.dispose();
@@ -177,6 +223,6 @@ run(['plugin','--profile','privacy-test','remove','dsh-privacy-mode']);
 const restored=yaml.load(run(['--profile','privacy-test','--dump-config']),{schema:entryListSchema});
 assert.equal(restored.find(r=>r.id==='session-log-deepseek').config?.enabled,undefined);
 assert.ok(!restored.some(r=>r.id==='privacy-mode'));
-const report={passed:true,dshVersion:SUPPORTED_DSH,controls:{officialProductCollectorRequests:controlRequests,officialFeedbackCollectorRequests:allControlRequests-controlRequests,privacyCollectorRequests:0,identityReads},tests:['official native patch composition','higher-precedence override detected','real official product exporter positive control','real canonical feedback exporter positive control','real CLI tarball install/default selection','real CLI composed desktop bundle layers in custom profile','installed offline checker','selected real modules cold boot + installed privacy guard','failed guard does not publish status','live analytics false, no identity read','session telemetry no reporter','real request registry no log/inventory fields and no errors','same-module positive control restores both request fields','live override audit reports failure','feedback/product event/dispose produce no collector requests','real CLI uninstall restores lower layers'],note:'Synthetic data and local collector only. Selected official modules booted, not full Electron GUI. Does not guarantee all egress is blocked.',temporaryTestHome:temp};
+const report={passed:true,dshVersion:SUPPORTED_DSH,controls:{officialProductCollectorRequests:controlRequests,officialFeedbackCollectorRequests:allControlRequests-controlRequests,privacyCollectorRequests:0,identityReads},tests:['official native patch composition','higher-precedence override detected','real official product exporter positive control','real canonical feedback exporter positive control','real CLI tarball install/default selection','real CLI composed desktop bundle layers in custom profile','installed offline checker','selected real modules cold boot + installed privacy guard','override is reported without failing the plugin','live analytics false, no identity read','session telemetry no reporter','saved selection stays pending until the next boot','a new boot applies the saved selection','real request registry no log/inventory fields and no errors','same-module positive control restores both request fields','live override audit reports failure','feedback/product event/dispose produce no collector requests','real CLI uninstall restores lower layers'],note:'Synthetic data and local collector only. Selected official modules booted, not full Electron GUI. Does not guarantee all egress is blocked.',temporaryTestHome:temp};
 const reportPath=process.env.DSH_TEST_RESULT??fileURLToPath(new URL('../TEST_RESULT.json',import.meta.url));
 await writeFile(reportPath,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));

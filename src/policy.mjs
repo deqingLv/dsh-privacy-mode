@@ -18,12 +18,13 @@ export function flattenEntries(entries, ancestors = new Set()) {
 }
 
 // Does not evaluate arbitrary !!js expressions. An unresolved value is NOT proof of privacy.
-export function auditEntries(entries, { runtimeVersion, desktop = false } = {}) {
+export function auditEntries(entries, { runtimeVersion, desktop = false, expected = { feedback:false, sessionLog:false, inventory:false, productAnalytics:false, productExport:false } } = {}) {
   const rows = flattenEntries(entries);
   const issues = [];
   const checks = [];
   if (runtimeVersion !== SUPPORTED_DSH) issues.push({ code: 'UNVERIFIED_VERSION', target: 'runtime' });
-  for (const rule of TARGETS) {
+  const selected = [expected.feedback, expected.sessionLog, expected.inventory, expected.productExport, expected.productAnalytics];
+  for (const [index, rule] of TARGETS.entries()) {
     const matches = rows.filter(row => row.id === rule.id);
     if (!matches.length && !desktop && rule.id.startsWith('desktop-')) {
       checks.push({ id: rule.id, status: 'not-applicable' }); continue;
@@ -40,9 +41,11 @@ export function auditEntries(entries, { runtimeVersion, desktop = false } = {}) 
       issues.push({ code: 'MODULE_IDENTITY_MISMATCH', target: rule.id });
       checks.push({ id: rule.id, status: 'unverified' }); continue;
     }
-    const safe = rule.disabled ? row.disabled === true : row.disabled === true || row.config?.[rule.key] === rule.value;
+    const wanted = index === 0 ? (selected[index] ? 'FEEDBACK_ONLY' : 'DISABLED') : index === 3 ? !selected[index] : selected[index];
+    const actual = index === 3 ? row.disabled : row.config?.[rule.key];
+    const safe = actual === wanted && (index === 3 || row.disabled !== true || !selected[index]);
     if (!safe) issues.push({ code: 'PRIVACY_OVERRIDE_OR_UNRESOLVED', target: rule.id });
-    checks.push({ id: rule.id, status: safe ? 'configured-off' : 'unsafe-or-unresolved' });
+    checks.push({ id: rule.id, status: safe ? 'as-selected' : 'unsafe-or-unresolved', selection: selected[index] ? 'selected-on' : 'selected-off' });
   }
   const knownNames = new Set(TARGETS.map(r => r.name));
   // Duplicate official channel instances under another id are outside the bundle's id-targeted controls.
@@ -52,7 +55,7 @@ export function auditEntries(entries, { runtimeVersion, desktop = false } = {}) 
     }
   }
   const sink = rows.filter(row => row.id === 'privacy-mode-product-sink');
-  if (desktop && (sink.length !== 1 || sink[0].name !== 'dsh-privacy-mode/product-sink' || sink[0].disabled === true)) {
+  if (desktop && (sink.length !== 1 || sink[0].name !== 'dsh-privacy-mode/product-sink' || Boolean(sink[0].disabled) !== Boolean(expected.productExport))) {
     issues.push({ code: 'MISSING_PRIVACY_SINK', target: 'privacy-mode-product-sink' });
   }
   return { scope: 'known-official-reporting-channels', ok: issues.length === 0, runtimeVersion, desktop, checks, issues,

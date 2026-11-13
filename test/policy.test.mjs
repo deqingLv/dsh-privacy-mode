@@ -55,5 +55,19 @@ test('shipped bundle disables defaults; no install-time script or executable exp
   const schema = yaml.JSON_SCHEMA.extend(new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: data => ({ __jsExpr: data }) }));
   const patch = yaml.load(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'), { schema });
   assert.deepEqual(patch.filter(p => p.id).map(p => p.id), TARGETS.map(t => t.id));
-  assert.equal(audit(patch.filter(p => p.id).concat(patch.at(-1).insert)).ok, true);
+  assert.equal(audit(patch.filter(p => p.id).concat(patch.at(-1).insert)).ok, false, 'offline expressions remain unresolved');
+});
+
+for (let mask=0;mask<32;mask++) test(`selection combination ${mask}`,()=>{
+ const keys=['feedback','sessionLog','inventory','productExport','productAnalytics'];
+ const expected=Object.fromEntries(keys.map((key,i)=>[key,Boolean(mask & (1<<i))]));
+ const rows=valid();
+ rows[0].config.mode=expected.feedback?'FEEDBACK_ONLY':'DISABLED';
+ rows[1].config.enabled=expected.sessionLog; rows[2].config.enabled=expected.inventory;
+ rows[3].disabled=!expected.productExport; rows[4].config.enabled=expected.productAnalytics;
+ rows[5].disabled=expected.productExport;
+ const report=auditEntries(rows,{runtimeVersion:SUPPORTED_DSH,desktop:true,expected});
+ assert.equal(report.ok,true); assert.ok(report.checks.every(c=>c.status==='as-selected'));
+ rows[1].config.enabled=!expected.sessionLog;
+ assert.ok(auditEntries(rows,{runtimeVersion:SUPPORTED_DSH,desktop:true,expected}).issues.some(i=>i.code==='PRIVACY_OVERRIDE_OR_UNRESOLVED'));
 });

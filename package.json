@@ -5,25 +5,81 @@
   "type": "module",
   "license": "MIT",
   "author": "dsh-privacy-mode contributors",
-  "repository": { "type": "git", "url": "git+https://github.com/deqingLv/dsh-privacy-mode.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deqingLv/dsh-privacy-mode.git"
+  },
   "homepage": "https://github.com/deqingLv/dsh-privacy-mode#readme",
-  "bugs": { "url": "https://github.com/deqingLv/dsh-privacy-mode/issues" },
+  "bugs": {
+    "url": "https://github.com/deqingLv/dsh-privacy-mode/issues"
+  },
   "main": "./src/index.mjs",
   "exports": {
     ".": "./src/index.mjs",
+    "./client": "./src/client.js",
     "./product-sink": "./src/product-sink.mjs",
     "./policy": "./src/policy.mjs",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json",
-    "./locale/*.json": "./locale/*.json"
+    "./locale/*.json": "./locale/*.json",
+    "./boot-policy": "./src/boot-policy.cjs"
   },
-  "bin": { "dsh-privacy-mode": "./bin/check.mjs" },
-  "files": ["src/", "bin/", "locale/", "cordis.patch.yml", "README.md", "SECURITY.md", "ACCEPTANCE.md", "LICENSE", "provenance.json"],
-  "engines": { "node": ">=24.9.0", "dsh": "0.2.1-rc.5" },
-  "peerDependencies": { "@deepseek-ai/cordis": "~4.0.5", "@deepseek-ai/dsh-app-boot": "0.2.1-rc.5" },
-  "peerDependenciesMeta": { "@deepseek-ai/cordis": { "optional": true }, "@deepseek-ai/dsh-app-boot": { "optional": true } },
-  "scripts": { "test": "node --test test/*.test.mjs", "test:integration": "node test/integration.mjs", "check": "node --check src/index.mjs && node --check src/policy.mjs && node --check src/product-sink.mjs && node --check bin/check.mjs && npm test" },
-  "dependencies": { "js-yaml": "4.1.1" },
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
-  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "privacy", "telemetry"]
+  "bin": {
+    "dsh-privacy-mode": "./bin/check.mjs"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "locale/",
+    "cordis.patch.yml",
+    "README.md",
+    "SECURITY.md",
+    "ACCEPTANCE.md",
+    "LICENSE",
+    "provenance.json"
+  ],
+  "engines": {
+    "node": ">=24.9.0",
+    "dsh": "0.2.1-rc.5"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-app-boot": "0.2.1-rc.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-app-boot": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:integration": "node test/integration.mjs",
+    "check": "node --check src/index.mjs && node --check src/policy.mjs && node --check src/product-sink.mjs && node --check src/client.js && node --check bin/check.mjs && npm test"
+  },
+  "dependencies": {
+    "js-yaml": "4.1.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "privacy",
+    "telemetry"
+  ]
 }
