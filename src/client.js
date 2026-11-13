@@ -34,6 +34,7 @@ window.__ModuleLoader__.load({
 			busy: '另一处正在保存，请稍后重试',
 			applied: '本次启动',
 			failed: '保存失败',
+			saveFailed: '保存未生效',
 			loadFailed: '读取失败',
 			issues: '审计问题',
 			guarantee: '审计只核对配置，不抓包，也不是出站防火墙。',
@@ -68,6 +69,7 @@ window.__ModuleLoader__.load({
 			busy: 'Another save is in progress; try again',
 			applied: 'This boot',
 			failed: 'Save failed',
+			saveFailed: 'Not saved',
 			loadFailed: 'Load failed',
 			issues: 'Audit problems',
 			guarantee: 'The audit checks configuration only. It is not packet capture and not an egress firewall.',
@@ -146,6 +148,26 @@ window.__ModuleLoader__.load({
 				next[channel.key] = source[channel.key] === true;
 				return next;
 			}, {});
+		}
+
+		/**
+		 * Render an audit issue with its affected target, if the Host named one.
+		 * @param issue - one entry from `status.issues`.
+		 * @returns the label shown to the user.
+		 */
+		function issueLabel(issue) {
+			const target = issue?.target || issue?.channel;
+			return `${issue?.code ?? ''}${target ? ` · ${target}` : ''}`;
+		}
+
+		/**
+		 * Every switch is disabled while any save is in flight: each save posts the
+		 * complete selection, so a second concurrent save would drop the first change.
+		 * @param busy - the channel currently saving, or null.
+		 * @returns whether the switches must be disabled.
+		 */
+		function controlsDisabled(busy) {
+			return busy !== null && busy !== undefined;
 		}
 
 		/**
@@ -280,7 +302,7 @@ window.__ModuleLoader__.load({
 									enabled: channels[channel.key] === true,
 									applied: appliedChannels[channel.key] === true,
 									busy: busy === channel.key,
-									disabled: false,
+									disabled: controlsDisabled(busy),
 									t,
 									onToggle: toggle
 								},
@@ -289,12 +311,15 @@ window.__ModuleLoader__.load({
 						)
 					}),
 					notice ? jsx('div', { className: 'sb-priv-notice', role: 'status', children: notice }) : null,
+					error && phase === 'ready'
+						? jsxs('div', { className: 'sb-priv-error', role: 'alert', children: [t('saveFailed'), ': ', error] })
+						: null,
 					issues.length > 0
 						? jsxs('div', {
 								className: 'sb-priv-issues',
 								children: [
 									jsx('div', { className: 'sb-priv-issues-title', children: t('issues') }),
-									jsx('ul', { children: issues.map((issue, index) => jsx('li', { children: `${issue.code}${issue.channel ? ` · ${issue.channel}` : ''}` }, index)) })
+									jsx('ul', { children: issues.map((issue, index) => jsx('li', { children: issueLabel(issue) }, index)) })
 								]
 							})
 						: null,
@@ -386,6 +411,8 @@ window.__ModuleLoader__.load({
 		exports.channelMap = channelMap;
 		exports.readSettings = readSettings;
 		exports.saveSettings = saveSettings;
+		exports.issueLabel = issueLabel;
+		exports.controlsDisabled = controlsDisabled;
 		return module.exports;
 	}
 });

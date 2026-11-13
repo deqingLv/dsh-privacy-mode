@@ -17,6 +17,7 @@ export function flattenEntries(entries, ancestors = new Set()) {
   });
 }
 
+export const isExpr = value => !!value && typeof value === 'object' && !Array.isArray(value) && typeof value.__jsExpr === 'string';
 // Does not evaluate arbitrary !!js expressions. An unresolved value is NOT proof of privacy.
 export function auditEntries(entries, { runtimeVersion, desktop = false, expected = { feedback:false, sessionLog:false, inventory:false, productAnalytics:false, productExport:false } } = {}) {
   const rows = flattenEntries(entries);
@@ -41,9 +42,14 @@ export function auditEntries(entries, { runtimeVersion, desktop = false, expecte
       issues.push({ code: 'MODULE_IDENTITY_MISMATCH', target: rule.id });
       checks.push({ id: rule.id, status: 'unverified' }); continue;
     }
-    const wanted = index === 0 ? (selected[index] ? 'FEEDBACK_ONLY' : 'DISABLED') : index === 3 ? !selected[index] : selected[index];
+    const wanted = index === 0 ? (selected[index] ? 'FEEDBACK_ONLY' : 'DISABLED') : index === 3 ? (!desktop || !selected[index]) : selected[index];
     const actual = index === 3 ? row.disabled : row.config?.[rule.key];
-    const safe = actual === wanted && (index === 3 || row.disabled !== true || !selected[index]);
+    if (isExpr(actual) || isExpr(row.disabled)) {
+      issues.push({ code: 'EXPRESSION_REQUIRES_RUNTIME', target: rule.id });
+      checks.push({ id: rule.id, status: 'unresolved-expression', selection: selected[index] ? 'selected-on' : 'selected-off' });
+      continue;
+    }
+    const safe = actual === wanted && (index === 3 || row.disabled !== true || !selected[index] || (!desktop && rule.id === 'product-analytics'));
     if (!safe) issues.push({ code: 'PRIVACY_OVERRIDE_OR_UNRESOLVED', target: rule.id });
     checks.push({ id: rule.id, status: safe ? 'as-selected' : 'unsafe-or-unresolved', selection: selected[index] ? 'selected-on' : 'selected-off' });
   }
@@ -55,7 +61,9 @@ export function auditEntries(entries, { runtimeVersion, desktop = false, expecte
     }
   }
   const sink = rows.filter(row => row.id === 'privacy-mode-product-sink');
-  if (desktop && (sink.length !== 1 || sink[0].name !== 'dsh-privacy-mode/product-sink' || Boolean(sink[0].disabled) !== Boolean(expected.productExport))) {
+  if (desktop && sink.length === 1 && isExpr(sink[0].disabled)) {
+    issues.push({ code: 'EXPRESSION_REQUIRES_RUNTIME', target: 'privacy-mode-product-sink' });
+  } else if (desktop && (sink.length !== 1 || sink[0].name !== 'dsh-privacy-mode/product-sink' || Boolean(sink[0].disabled) !== Boolean(expected.productExport))) {
     issues.push({ code: 'MISSING_PRIVACY_SINK', target: 'privacy-mode-product-sink' });
   }
   return { scope: 'known-official-reporting-channels', ok: issues.length === 0, runtimeVersion, desktop, checks, issues,

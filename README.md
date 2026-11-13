@@ -14,7 +14,7 @@ DSH 原生插件包：安装并启用后，默认关闭已核验的官方上报�
 | 桌面产品埋点采集 | `product-analytics.enabled: false` |
 | 桌面产品埋点真实导出器 | `desktop-product-telemetry.disabled: true` |
 
-提供一个不存储、不发送记录的 `productTelemetry` 空实现，以保留官方 `productAnalytics` RPC 的禁用状态查询能力，避免其依赖缺失导致桌面报错。插件只增加本地只读 `privacyMode.status()` 服务，不增加模型工具、计时器或外部监听端口。
+提供一个不存储、不发送记录的 `productTelemetry` 空实现，以保留官方 `productAnalytics` RPC 的禁用状态查询能力，避免其依赖缺失导致桌面报错。插件增加本地只读 `privacyMode.status()` 服务、一条已鉴权的设置读写路由（复用宿主现有 `/api` 连接，不新开端口）和“设置 → 插件”里的设置页；不增加模型工具、计时器或外部监听端口。
 
 ## 安装
 
@@ -42,16 +42,19 @@ dsh plugin --profile web add /path/to/dsh-privacy-mode
 
 ## 验证
 
-插件包层在宿主启动前参与组合。DSH 的 Profile patch、Home patch、命令行 patch，以及后加入的其他 bundle 可以覆盖它的默认值。**默认关闭不是强制锁定。** 本插件发现受保护条目被覆盖、模块同名不同源、额外官方上报实例或版本未验证时显式失败；这只说明插件未通过检查，不会停止整个 dsh 或自动改写配置。DSH 本身可能继续启动，不能把“装了插件”当安全边界。
+插件包层在宿主启动前参与组合。DSH 的 Profile patch、Home patch、命令行 patch，以及后加入的其他 bundle 可以覆盖它的默认值。**默认关闭不是强制锁定。** 本插件发现受保护条目被覆盖、模块同名不同源、额外官方上报实例或版本未验证时，会把问题列进 `ctx.privacyMode.status().issues` 并在页面显示，但不会让插件自身失效、不会停止整个 dsh、也不会自动改写配置。DSH 本身可能继续启动，不能把“装了插件”当安全边界。
 
 Web / 自定义 Profile 可导出组合配置，再离线检查；桌面版不应照搬这条 CLI 命令，需通过其插件检查入口查看本包的加载状态，完整状态可由受信任本地 Cordis 检查器读取 `ctx.privacyMode.status()`。桌面 GUI 的检查入口尚未实测。
 
 ```sh
 dsh --profile web --dump-config > /tmp/dsh-privacy-config.yml
 node ./bin/check.mjs \
-  --config /tmp/dsh-privacy-config.yml --dsh-version 0.2.1-rc.5
+  --config /tmp/dsh-privacy-config.yml --dsh-version 0.2.1-rc.5 \
+  --profile-dir ~/.dsh/profiles/web
 # 对已取得的桌面组合配置快照，在检查命令最后加 --desktop。
 ```
+
+`dump-config` 按设计**不求值 `!!js`**，所以本包五项目标在 dump 里只是表达式。`--profile-dir` 让检查器用该 Profile 的偏好文件求出这五项（以及 sink）自己的期望值，再逐项比对；其他插件的表达式一律不执行，仍是未解析值。**省略 `--profile-dir` 时这五项必然报 `EXPRESSION_REQUIRES_RUNTIME`**，不能据此判定配置被覆盖。
 
 配置 dump 可能包含你其他配置中的敏感信息；仅本地保存，不外发。本检查工具不打印配置内容、不执行 `!!js`、不读账号或凭据、不运行 dsh。
 
@@ -106,7 +109,7 @@ DSH_TEST_PNPM=/path/to/existing/pnpm.cjs npm run test:integration
 - 产品埋点拆成两个开关：`产品分析采集` 决定是否采集（可能读取系统与身份信息），`产品分析导出` 决定是否真的发往 OTLP 端点。只开采集、不开导出时，事件会被零传输接收器直接丢弃（不排队、不补传）。
 - 页面同时显示**已保存的选择**（开关本身）、**本次启动实际生效的值**（每行下方的“本次启动”）和**当前运行态**（反馈导出模式、采集是否开启、零传输接收器是否在位）。三者不一致时以“待重启”提示，不假装已经生效。
 - 审计仍然生效：如果其他 Profile/Home patch 覆盖了受保护条目，页面会列出问题码（`PRIVACY_OVERRIDE_OR_UNRESOLVED` 等），但插件不会因此让整个 DSH 启动失败——它只报告，不接管。
-- 设置走宿主已鉴权的 `GET/POST /api/privacy-mode/settings`，只写 `privacy-mode/prefs.json`，绝不调用配置编辑器或热重载 Loader。并发修改会返回 `PREFS_CONFLICT`，页面重新读取最新状态而不是覆盖别人的改动；另一个保存正在进行时返回 `PREFS_BUSY`（同样 409），页面提示稍后重试并重新读取。
+- 设置走宿主已鉴权的 `GET/POST /api/privacy-mode/settings`，只写 `privacy-mode/prefs.json`，绝不调用配置编辑器或热重载 Loader。并发修改会返回 `PREFS_CONFLICT`，页面重新读取最新状态而不是覆盖别人的改动；另一个保存正在进行时返回 `PREFS_BUSY`（同样 409），页面提示稍后重试并重新读取。锁文件不会自动回收（读持有者再改名或删除不是原子操作），崩溃遗留的锁需人工删除 `privacy-mode/.prefs.lock`。
 
 **边界不变**：这是配置控制，不是抓包，也不是出站防火墙。真实 Electron 冷启动验收尚未执行；在完成之前请使用隔离 Profile，并保持全关。
 
@@ -116,6 +119,6 @@ After installation, **Settings → Plugins → Privacy reporting** lists the fiv
 
 Saving writes the profile's `privacy-mode/prefs.json` and only affects the **next cold start** — the running process and configuration reloads never turn a channel on, and the page says so. Collection (`productAnalytics`) and export (`productExport`) are separate switches: with export off, the zero-transport sink drops collected events instead of queueing or retrying them. The page shows the saved selection (the switches), the value this boot actually applied (a “This boot” line under each row), and the live runtime state, so a pending change is never presented as active.
 
-The audit still reports overrides (`PRIVACY_OVERRIDE_OR_UNRESOLVED` and friends) as page issues without failing the whole DSH boot. Settings travel over the Host's authenticated `GET/POST /api/privacy-mode/settings`, which only writes preferences — it never calls the config editor or hot-reloads the loader; a concurrent write returns `PREFS_CONFLICT` and the page reloads instead of overwriting, while a save already in flight returns `PREFS_BUSY` (also 409) so the page can ask for a retry.
+The audit still reports overrides (`PRIVACY_OVERRIDE_OR_UNRESOLVED` and friends) as page issues without failing the whole DSH boot. Settings travel over the Host's authenticated `GET/POST /api/privacy-mode/settings`, which only writes preferences — it never calls the config editor or hot-reloads the loader; a concurrent write returns `PREFS_CONFLICT` and the page reloads instead of overwriting, while a save already in flight returns `PREFS_BUSY` (also 409) so the page can ask for a retry. Lock files are never reclaimed automatically (reading the owner and then renaming or unlinking is not atomic); a lock left by a crash must be removed by hand at `privacy-mode/.prefs.lock`.
 
 This is still a configuration control, not packet capture and not an egress firewall. A real Electron cold-start acceptance test has not been performed; use an isolated profile and keep every channel off until it is.

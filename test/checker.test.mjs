@@ -1,33 +1,64 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, writeFile, readFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import yaml from 'js-yaml';
 import { TARGETS, SUPPORTED_DSH } from '../src/policy.mjs';
-const cli=fileURLToPath(new URL('../bin/check.mjs',import.meta.url));
-const invoke=args=>spawnSync(process.execPath,[cli,...args],{encoding:'utf8',timeout:10000});
-test('CLI accepts safe snapshot, does not change file',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'privacy-check-'));const file=join(dir,'snapshot.json');
- const rows=TARGETS.map(t=>({id:t.id,name:t.name,...t.disabled?{disabled:true}:{config:{[t.key]:t.value}}}));
- const text=JSON.stringify(rows);await writeFile(file,text);
- const r=invoke(['--config',file,'--dsh-version',SUPPORTED_DSH]);assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).ok,true);
- assert.equal(await readFile(file,'utf8'),text);
+import { DEFAULT_CHANNELS } from '../src/prefs.mjs';
+const checker = new URL('../bin/check.mjs', import.meta.url).pathname;
+const expr = new yaml.Type('tag:yaml.org,2002:js', { kind: 'scalar', construct: data => ({ __jsExpr: data }) });
+const schema = yaml.JSON_SCHEMA.extend(expr);
+async function dump(change = () => {}) {
+  const patch = yaml.load(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'), { schema });
+  const rows = patch.flatMap(row => row.insert ?? [row]);
+  change(rows);
+  const dir = await mkdtemp(join(tmpdir(), 'privacy-check-'));
+  const file = join(dir, 'dump.yml');
+  await writeFile(file, yaml.dump(rows));
+  return { dir, file };
+}
+const run = ({file,dir}, profile = true, desktop = true) => spawnSync(process.execPath, [checker, '--config', file, '--dsh-version', SUPPORTED_DSH, ...(desktop ? ['--desktop'] : []), ...(profile ? ['--profile-dir', dir] : [])], {encoding:'utf8'});
+
+test('an unevaluated dump is reported as unresolved, not as an override', async () => {
+  const out = run(await dump(), false);
+  assert.equal(out.status, 2);
+  const report = JSON.parse(out.stdout);
+  assert.ok(report.issues.every(i => i.code === 'EXPRESSION_REQUIRES_RUNTIME'));
 });
-test('CLI version and incomplete snapshots fail with status 2',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'privacy-check-'));const file=join(dir,'snapshot.json');await writeFile(file,'[]');
- const r=invoke(['--config',file,'--dsh-version','999.0.0']);assert.equal(r.status,2);assert.equal(JSON.parse(r.stdout).ok,false);
+test('--profile-dir resolves exact bundled expressions', async () => {
+  const out = run(await dump());
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.equal(JSON.parse(out.stdout).checks.filter(c => c.status === 'as-selected').length, TARGETS.length);
 });
-test('CLI unknown, duplicate and missing options rejected',()=>{
- for(const args of [['--no-tracking'],['--config'],['--desktop','--desktop'],['--dsh-version','x','--dsh-version','y']])assert.equal(invoke(args).status,1);
+test('saved selection is checked for desktop and web without evaluating code', async () => {
+  const fixture = await dump();
+  await mkdir(join(fixture.dir,'privacy-mode'));
+  await writeFile(join(fixture.dir,'privacy-mode','prefs.json'), JSON.stringify({version:1,updatedAt:'2026-01-01T00:00:00.000Z',channels:{...DEFAULT_CHANNELS,feedback:true,productExport:true,productAnalytics:true}}));
+  for (const desktop of [true,false]) {
+    const out=run(fixture,true,desktop);
+    assert.equal(out.status,0,out.stdout+out.stderr);
+  }
 });
-test('invalid YAML never exposes sensitive parser excerpts',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'privacy-check-'));const file=join(dir,'snapshot.yml');await writeFile(file,'secret-synthetic-test: [broken');
- const r=invoke(['--config',file,'--dsh-version',SUPPORTED_DSH]);assert.equal(r.status,1);assert.ok(!r.stderr.includes('secret-synthetic-test'));
+for (const replacement of [{__jsExpr:'true'}, {value:false}, true]) {
+  test(`profile resolution preserves foreign override ${JSON.stringify(replacement)}`, async () => {
+    const fixture=await dump(rows=> { rows.find(r=>r.id==='session-log-deepseek').config.enabled=replacement; });
+    const out=run(fixture);
+    assert.equal(out.status,2,out.stdout);
+    assert.ok(JSON.parse(out.stdout).issues.some(i=>i.target==='session-log-deepseek'));
+  });
+}
+test('unknown disabled expression and wrong module never become verified',async()=>{
+  for (const change of [
+    rows=>{rows.find(r=>r.id==='product-analytics').disabled={__jsExpr:'false'};},
+    rows=>{rows.find(r=>r.id==='privacy-mode-product-sink').disabled={__jsExpr:'false'};},
+    rows=>{rows.find(r=>r.id==='session-log-deepseek').name='other-module';}
+  ]) assert.equal(run(await dump(change)).status,2);
 });
-test('!!js does not execute even when checking unsafe expressions',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'privacy-check-'));const file=join(dir,'snapshot.yml');
- await writeFile(file,'- id: session-log-deepseek\n  name: "@deepseek-ai/dsh-session-log-deepseek"\n  config:\n    enabled: !!js "throw new Error(\'executed-synthetic\')"\n');
- const r=invoke(['--config',file,'--dsh-version',SUPPORTED_DSH]);assert.equal(r.status,2);assert.ok(!r.stderr.includes('executed-synthetic'));
+test('corrupt preferences cannot produce a passing offline audit',async()=>{
+  const fixture=await dump();
+  await mkdir(join(fixture.dir,'privacy-mode'));
+  await writeFile(join(fixture.dir,'privacy-mode','prefs.json'),'{');
+  assert.equal(run(fixture).status,1);
 });

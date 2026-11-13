@@ -161,3 +161,19 @@ test('saveSettings surfaces a conflict so the page can reload', async () => {
 		(error) => error.code === 'PREFS_CONFLICT'
 	);
 });
+
+test('issueLabel names the affected target and survives a bare issue', () => {
+	const client = loadClient();
+	assert.equal(client.issueLabel({ code: 'PRIVACY_OVERRIDE_OR_UNRESOLVED', target: 'session-log-deepseek' }), 'PRIVACY_OVERRIDE_OR_UNRESOLVED · session-log-deepseek');
+	assert.equal(client.issueLabel({ code: 'MISSING_PRIVACY_SINK', channel: 'productExport' }), 'MISSING_PRIVACY_SINK · productExport');
+	assert.equal(client.issueLabel({ code: 'ROUTE_UNAVAILABLE' }), 'ROUTE_UNAVAILABLE');
+	assert.equal(client.issueLabel(null), '');
+});
+
+test('every switch is disabled while a save is in flight', () => {
+	const client = loadClient();
+	assert.equal(client.controlsDisabled(null), false);
+	assert.equal(client.controlsDisabled(undefined), false);
+	assert.equal(client.controlsDisabled('feedback'), true);
+	assert.equal(client.controlsDisabled(''), true);
+});

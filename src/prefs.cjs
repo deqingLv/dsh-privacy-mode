@@ -5,19 +5,30 @@ const DEFAULT_CHANNELS = Object.freeze({feedback:false,sessionLog:false,inventor
 const keys = Object.keys(DEFAULT_CHANNELS);
 function validChannels(c) { return !!c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length === keys.length && keys.every(k => Object.hasOwn(c,k) && typeof c[k] === 'boolean'); }
 const LOCK_WAIT_MS = 1000;
-const LOCK_STALE_MS = 10000;
 const sleepSync = ms => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms); } catch {} };
+function writeLock(fd) { const token=crypto.randomBytes(12).toString('hex'); fs.writeFileSync(fd,JSON.stringify({pid:process.pid,token})+ '\n'); return token; }
+function readLock(lock) { try { const v=JSON.parse(fs.readFileSync(lock,'utf8')); return v && typeof v.token === 'string' ? v : null; } catch { return null; } }
 // A second writer waits briefly instead of failing: contention means "retry", not "prefs broken".
-// A lock older than LOCK_STALE_MS is treated as left behind by a crashed process and reclaimed.
+// Never reclaim an existing lock automatically: read-owner then rename/unlink is
+// not atomic and can remove a new owner's lock. Recover crash leftovers offline.
 function acquireLock(lock) {
  const deadline=Date.now()+LOCK_WAIT_MS;
  for (;;) {
-  try { return fs.openSync(lock,'wx',0o600); }
+  let fd;
+  try { fd=fs.openSync(lock,'wx',0o600); }
   catch(e) {
    if (e.code !== 'EEXIST') { const failed=new Error('Cannot create preference lock'); failed.code='PREFS_WRITE_FAILED'; throw failed; }
-   try { if (Date.now()-fs.statSync(lock).mtimeMs > LOCK_STALE_MS) { fs.unlinkSync(lock); continue; } } catch {}
    if (Date.now() >= deadline) { const busy=new Error('Another save is in progress'); busy.code='PREFS_BUSY'; throw busy; }
    sleepSync(25);
+   continue;
+  }
+  try { return { fd, token: writeLock(fd) }; }
+  catch (cause) {
+   fs.closeSync(fd);
+   // The exclusive lock is ours; no other writer may reclaim it.
+   try { fs.unlinkSync(lock); } catch {}
+   const failed = new Error('Cannot initialize preference lock', { cause });
+   failed.code = 'PREFS_WRITE_FAILED'; throw failed;
   }
  }
 }
@@ -34,7 +45,7 @@ async function writePrefs(dir, channels, expectedUpdatedAt) {
  if (!validChannels(channels)) { const e=new Error('Invalid channels'); e.code='INVALID_CHANNEL'; throw e; }
  const folder=path.join(dir,'privacy-mode'); fs.mkdirSync(folder,{recursive:true,mode:0o700}); fs.chmodSync(folder,0o700);
  // Exclusive lock serializes CAS across processes; failures never replace prefs.
- const lock=path.join(folder,'.prefs.lock'); const fd=acquireLock(lock);
+ const lock=path.join(folder,'.prefs.lock'); const {fd,token}=acquireLock(lock);
  let temp;
  try {
   const current=readPrefsSync(dir);
@@ -47,6 +58,6 @@ async function writePrefs(dir, channels, expectedUpdatedAt) {
   fs.renameSync(temp,path.join(folder,'prefs.json')); temp=null;
   const d=fs.openSync(folder,'r'); try { fs.fsyncSync(d); } finally { fs.closeSync(d); }
   return value;
- } finally { if(temp) { try { fs.unlinkSync(temp); } catch {} } fs.closeSync(fd); fs.unlinkSync(lock); }
+ } finally { if(temp) { try { fs.unlinkSync(temp); } catch {} } fs.closeSync(fd); if (readLock(lock)?.token === token) { try { fs.unlinkSync(lock); } catch {} } }
 }
 module.exports={DEFAULT_CHANNELS,validChannels,readPrefsSync,writePrefs};

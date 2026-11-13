@@ -71,3 +71,14 @@ for (let mask=0;mask<32;mask++) test(`selection combination ${mask}`,()=>{
  rows[1].config.enabled=!expected.sessionLog;
  assert.ok(auditEntries(rows,{runtimeVersion:SUPPORTED_DSH,desktop:true,expected}).issues.some(i=>i.code==='PRIVACY_OVERRIDE_OR_UNRESOLVED'));
 });
+
+test('unresolved boot expressions are reported, not called an override', () => {
+  const rows = valid();
+  rows[0].config.mode = { __jsExpr: 'true' };
+  rows[5].disabled = { __jsExpr: 'false' };
+  const report = audit(rows);
+  assert.equal(report.ok, false);
+  assert.deepEqual(report.issues.map(i => i.code).sort(), ['EXPRESSION_REQUIRES_RUNTIME', 'EXPRESSION_REQUIRES_RUNTIME']);
+  assert.ok(report.checks.some(c => c.status === 'unresolved-expression'));
+  assert.ok(!report.issues.some(i => i.code === 'MISSING_PRIVACY_SINK'));
+});
