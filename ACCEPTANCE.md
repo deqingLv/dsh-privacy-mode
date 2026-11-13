@@ -19,8 +19,19 @@
 - 状态与覆盖：隔离 Loader 更高优先级重新开启 `product-analytics` 时，插件**仍发布** `privacyMode.status()`，`policy.ok === false` 且列出 `PRIVACY_OVERRIDE_OR_UNRESOLVED`；启动不再因审计失败而中断（旧版行为已废弃）。
 - 选择性上报 A/B：保存 `feedback: true` 后 `pendingRestart === true`、`applied.channels.feedback` 仍为 `false`、`sessionTelemetry.sharing` 仍是 `disabled`；用同一份偏好文件重新 boot 后 `sharing === 'feedback-only'`、`pendingRestart === false`；最后保存全关复原。
 - 真实 CLI 卸载：本包从选择列表移除，原组合默认值恢复，隐私条目消失；不覆盖用户原有 patch。
-- 集成测试共 **18 项**全部通过（`passed: true`，摘要写入 `DSH_TEST_RESULT`，最近一次为 `/tmp/privacy-integration-result2.json`），其中第 12、13 项正是「保存后本次不生效 / 重新 boot 才生效」的 A/B。
+- 集成测试共 **18 项**全部通过（`passed: true`，摘要写入 `DSH_TEST_RESULT`，最近一次为 `/tmp/privacy-integration-result3.json`），其中第 12、13 项正是「保存后本次不生效 / 重新 boot 才生效」的 A/B。
 - 设置页展示三层状态：已保存的选择、本次启动实际生效值（每行“本次启动”）、当前运行态；保存后仍显示“待重启生效”。
+
+## 独立核验
+
+交付后由只读核验代理复核 `74756ce`（不修改仓库、不安装插件），提出四条问题，均已修复并进入 `16afc59`：
+
+1. 跨进程锁竞争被报成 `PREFS_WRITE_FAILED`（HTTP 500），与文档「并发写返回 `PREFS_CONFLICT`」不符。改为 1 秒内有界重试、超时返回 `PREFS_BUSY`（409）、超过 10 秒的陈旧锁自动回收；设置页对 `PREFS_BUSY` 提示稍后重试并重新读取。
+2. 文档称「只开采集不开导出时事件留在本机队列」，实际零传输接收器直接丢弃。文档改为如实描述。
+3. 文档称页面展示已保存/本次启动/运行态三层，实际只渲染了已保存与运行态。设置页每行补「本次启动：开/关」。
+4. 验收文档引用了旧的 16 项集成摘要与旧测试数。改为 69 项单测与 18 项集成，并指明第 12/13 项是保存后不生效 / 重新 boot 生效的 A/B。
+
+核验同时确认：宿主设置路由先做 Host/Origin/cookie 校验，精确路由只允许 owner 身份；页面无 `innerHTML`/`eval`；偏好文件 0700/0600 且原子写。
 
 ## 本机正式环境边界
 
