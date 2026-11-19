@@ -46,7 +46,7 @@ function auditRow(entry) {
 export function apply(ctx, config = {}) {
 	if (config && Object.keys(config).length) throw new Error('dsh-privacy-mode accepts no options');
 	const applied = bootPolicy(ctx);
-	let routeAvailable = true;
+	let routeAvailable = false;
 
 	const status = () => {
 		const rows = [...ctx.loader.entries()].map(auditRow);
@@ -77,9 +77,17 @@ export function apply(ctx, config = {}) {
 
 	const service = Object.freeze({ status, save });
 	ctx.provide('privacyMode', service);
-	routeAvailable = registerRoutes(ctx, service);
-	const report = status();
-	if (report.issues.length) ctx.logger?.warn?.(`Privacy mode issues: ${report.issues.map((issue) => issue.code).join(', ')}`);
+	const announce = () => {
+		const report = status();
+		if (report.issues.length) ctx.logger?.warn?.(`Privacy mode issues: ${report.issues.map((issue) => issue.code).join(', ')}`);
+	};
+	// The dependency fiber owns registration for both existing and late services.
+	// Its cleanup releases the route and availability when connection is withdrawn.
+	ctx.inject(['connection'], routeCtx => {
+		routeAvailable = registerRoutes(routeCtx, service);
+		routeCtx.effect(() => () => { routeAvailable = false; });
+		announce();
+	});
 }
 
 export default { name: 'privacy-mode', inject: ['loader'], apply };

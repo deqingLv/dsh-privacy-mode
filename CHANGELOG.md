@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Bind settings-route registration to the connection dependency's own Cordis context for both already available and late services. Withdrawal now removes the old route and reports `ROUTE_UNAVAILABLE`; re-provision registers once, including reuse of the same connection object. No preference, boot-selection or request-validation policy changes. Optional real-Cordis lifecycle regressions use `DSH_TEST_RUNTIME` without adding production dependencies.
+
 ## [0.1.0] - 2026-11-12
 
 首个公开版本。
